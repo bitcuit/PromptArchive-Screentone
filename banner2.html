@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --mat: #3d6656;
+    --paper: #ffffff;
+    --memo: #fbfaf5;
+    --ink: #1b1b1d;
+    --ink-soft: #55565c;
+    --guide: #8cc4e6;
+    --guide-soft: #d7ecf8;
+    --guide-ink: #3f8fc0;
+    --redpen: #d4402c;
+    --tone: rgba(27, 27, 29, .3);
+    --mono: Consolas, "Courier New", monospace;
+    --sans: "Pretendard", "Malgun Gothic", "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 1254px; height: 1254px; overflow: hidden; }
+  body {
+    position: relative;
+    font-family: var(--sans);
+    color: var(--ink);
+    background-color: var(--mat);
+    background-image:
+      linear-gradient(rgba(255,255,255,.13) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.13) 1px, transparent 1px),
+      linear-gradient(rgba(255,255,255,.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.06) 1px, transparent 1px);
+    background-size: 220px 220px, 220px 220px, 44px 44px, 44px 44px;
+    background-position: -30px -18px;
+  }
+
+  /* 왼쪽 제목 */
+  .title {
+    position: absolute; left: 90px; top: 92px; width: 1080px;
+    color: #f2f5ef;
+  }
+  .series { font-size: 20px; letter-spacing: .42em; opacity: .85; }
+  .name {
+    margin-top: 12px;
+    font: italic 900 112px/1 "Segoe UI", var(--sans);
+    letter-spacing: -.02em;
+  }
+  .rule { margin: 28px 0 22px; height: 1px; background: rgba(242,245,239,.55); width: 560px; }
+  .sub { font-size: 18px; letter-spacing: .1em; opacity: .9; white-space: nowrap; }
+  .sub b { font-weight: 600; }
+
+  /* 콘티 메모 */
+  .conti {
+    position: absolute; left: 70px; top: 470px; width: 290px; height: 640px;
+    background: var(--memo);
+    transform: rotate(-4deg);
+    box-shadow: 0 10px 26px rgba(0,0,0,.3);
+    padding: 26px 0 0;
+  }
+  .conti::before {
+    content: ""; position: absolute; top: -12px; left: 90px; width: 120px; height: 26px;
+    background: rgba(246,240,214,.82); transform: rotate(2deg);
+  }
+  .conti h4 { padding: 0 22px 8px; font-size: 14px; letter-spacing: .2em; color: var(--guide-ink); border-bottom: 1px solid var(--guide); font-weight: 600; }
+  .crow { display: grid; grid-template-columns: 30px 1fr 22px; gap: 8px; align-items: center; padding: 9px 22px; border-bottom: 1px solid var(--guide-soft); }
+  .crow .no { font: 13px var(--mono); color: var(--guide-ink); }
+  .crow .t { font-size: 15px; font-weight: 600; }
+  .crow .k { display: block; font-size: 12px; font-weight: 400; color: var(--ink-soft); }
+  .crow .lk { font-size: 16px; color: var(--ink-soft); text-align: right; }
+  .crow.lock .t, .crow.lock .lk { color: var(--redpen); }
+
+  /* 원고지 */
+  .sheet {
+    position: absolute; left: 330px; top: 410px; width: 600px; height: 760px;
+    background: var(--paper);
+    transform: rotate(3deg);
+    box-shadow: 0 14px 34px rgba(0,0,0,.34);
+    padding: 34px 40px;
+  }
+  .crop { position: absolute; width: 22px; height: 22px; border-color: var(--guide); border-style: solid; }
+  .crop.tl { top: 12px; left: 12px; border-width: 1px 0 0 1px; }
+  .crop.tr { top: 12px; right: 12px; border-width: 1px 1px 0 0; }
+  .crop.bl { bottom: 12px; left: 12px; border-width: 0 0 1px 1px; }
+  .crop.br { bottom: 12px; right: 12px; border-width: 0 1px 1px 0; }
+  .margin { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; }
+  .printed { font-size: 12px; letter-spacing: .14em; color: var(--guide-ink); border: 1px solid var(--guide); padding: 1px 7px; }
+  .pno { font: 700 18px var(--mono); letter-spacing: .1em; }
+  .frame {
+    outline: 1px solid var(--guide); padding: 12px;
+    display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 250px 360px; gap: 12px 10px;
+  }
+  .panel { position: relative; border: 2px solid var(--ink); padding: 12px 14px; overflow: hidden; }
+  .panel.wide { grid-column: 1 / -1; }
+  .panel::after {
+    content: ""; position: absolute; inset: 0;
+    background-image: radial-gradient(circle, var(--tone) 0 1.6px, transparent 1.9px);
+    background-size: 8px 8px;
+    -webkit-mask-image: linear-gradient(150deg, transparent 0 42%, #000 82%);
+  }
+  .cap { position: relative; z-index: 1; display: inline-block; font-size: 13px; font-weight: 700; padding: 2px 8px; border: 1px solid var(--ink); background: var(--paper); }
+  .panel.a .cap { background: var(--ink); color: var(--paper); }
+  .lyric { position: relative; z-index: 1; margin-top: 14px; font-size: 27px; line-height: 1.45; font-weight: 700; }
+  .lyric i { font-style: normal; color: var(--guide-ink); }
+
+  /* 스크린톤 한 장(뒷종이 붙은 채) */
+  .tone-sheet {
+    position: absolute; left: 860px; top: 990px; width: 300px; height: 190px;
+    transform: rotate(-9deg);
+    background: #f1efe8;
+    box-shadow: 0 8px 20px rgba(0,0,0,.28);
+    padding: 14px;
+  }
+  .tone-sheet .dots {
+    height: 100%;
+    background-image: radial-gradient(circle, rgba(27,27,29,.55) 0 1.8px, transparent 2.1px);
+    background-size: 9px 9px;
+  }
+  .tone-sheet .label { position: absolute; left: 14px; bottom: -22px; font: 12px var(--mono); color: #eef3ef; letter-spacing: .1em; }
+</style>
+</head>
+<body>
+  <div class="title">
+    <div class="series">PROMPT ARCHIVE</div>
+    <div class="name">Screentone</div>
+    <div class="rule"></div>
+    <div class="sub">Manga Manuscript Printer <b>/</b> NovelAI Tag Prompts</div>
+  </div>
+
+  <div class="conti">
+    <h4>콘티</h4>
+    <div class="crow lock"><span class="no">01</span><span class="t">1girl, 1boy<span class="k">여자 1 · 남자 1</span></span><span class="lk">◆</span></div>
+    <div class="crow"><span class="no">02</span><span class="t">hug<span class="k">껴안기</span></span><span class="lk">◇</span></div>
+    <div class="crow"><span class="no">03</span><span class="t">kiss<span class="k">키스</span></span><span class="lk">◇</span></div>
+    <div class="crow"><span class="no">04</span><span class="t">blush<span class="k">홍조</span></span><span class="lk">◇</span></div>
+    <div class="crow"><span class="no">05</span><span class="t">closed eyes<span class="k">감은 눈</span></span><span class="lk">◇</span></div>
+    <div class="crow"><span class="no">06</span><span class="t">from above<span class="k">위에서 본 구도</span></span><span class="lk">◇</span></div>
+    <div class="crow lock"><span class="no">07</span><span class="t">on bed<span class="k">침대 위</span></span><span class="lk">◆</span></div>
+    <div class="crow"><span class="no">08</span><span class="t">heart<span class="k">하트</span></span><span class="lk">◇</span></div>
+  </div>
+
+  <div class="sheet">
+    <span class="crop tl"></span><span class="crop tr"></span><span class="crop bl"></span><span class="crop br"></span>
+    <div class="margin"><span class="printed">쪽</span><span class="pno">No. 0412</span></div>
+    <div class="frame">
+      <div class="panel wide"><span class="cap">기본 프롬프트</span>
+        <p class="lyric">1girl, 1boy, couple, on bed, from above, heart</p></div>
+      <div class="panel a"><span class="cap">A · 하는 쪽</span>
+        <p class="lyric">boy, <i>source#</i>hug, <i>source#</i>kiss</p></div>
+      <div class="panel b"><span class="cap">B · 받는 쪽</span>
+        <p class="lyric">girl, <i>target#</i>hug, <i>target#</i>kiss, blush, closed eyes</p></div>
+    </div>
+  </div>
+
+  <div class="tone-sheet"><div class="dots"></div><span class="label">TONE No.61 · 60L 10%</span></div>
+</body>
+</html>

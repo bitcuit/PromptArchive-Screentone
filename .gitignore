@@ -1,0 +1,6 @@
+DIRECTION.md
+HANDOFF.md
+*.bak
+.DS_Store
+Thumbs.db
+~$*.xlsx
