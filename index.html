@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Prompt Archive : Screentone</title>
-<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="favicon.svg?v=1.0" type="image/svg+xml">
+<link rel="stylesheet" href="styles.css?v=1.0">
 </head>
 <body>
 <main class="desk">
@@ -143,8 +144,15 @@
   <form method="dialog"><button class="nib">닫기</button></form>
 </dialog>
 
-<script src="data.js"></script>
-<script src="note.js"></script>
-<script src="app.js"></script>
+<script>
+  // 고친 뒤 브라우저가 예전 파일을 섞어 쓰다 멈추면, 읽는 중 문구 대신 새로고침 안내를 띄운다
+  addEventListener('error', () => {
+    const e = document.getElementById('empty');
+    if (e && !e.hidden) e.textContent = '화면을 다 불러오지 못했어요. Ctrl+F5로 새로고침해 주세요.';
+  });
+</script>
+<script src="data.js?v=1.0"></script>
+<script src="note.js?v=1.0"></script>
+<script src="app.js?v=1.0"></script>
 </body>
 </html>

@@ -5,6 +5,7 @@
 // 이미 정해진 값과 맞는 후보만 뽑는다. 잠근 값이 이기고, 나머지가 맞춰 바뀐다.
 
 const STORE = 'screentone:v1';
+// 올릴 때 index.html의 ?v= 도 같이 바꾼다(브라우저가 예전 파일을 섞어 쓰지 않게)
 const VERSION = '1.0';
 const EDITION = 'Screentone';
 const DIR_NAME = /\[?\s*A\s*(→|->)\s*B\s*\]?/i;

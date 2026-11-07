@@ -82,6 +82,7 @@ PromptArchive-Screentone/
 ├── app.js
 ├── styles.css
 ├── note.js      (받은 컷 TXT · MD · 노트 내보내기)
+├── favicon.svg
 └── banner1.png · banner2.png
 ```
 
@@ -95,7 +96,7 @@ HTML · CSS · JavaScript만 써요. 서버 · AI API · 외부 라이브러리�
 
 ## 버전
 
-화면 위 상표 옆에 버전이 있어요(`app.js`의 `VERSION`).
+화면 위 상표 옆에 버전이 있어요(`app.js`의 `VERSION`). 올릴 때는 `index.html`에서 파일 뒤에 붙은 `?v=`도 같은 숫자로 바꿔요. 그래야 브라우저가 예전 파일을 섞어 쓰지 않아요.
 
 | 버전 | 바뀐 것 |
 |---|---|
