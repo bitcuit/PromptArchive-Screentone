@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Prompt Archive : Screentone</title>
-<link rel="icon" href="favicon.svg?v=1.0" type="image/svg+xml">
-<link rel="stylesheet" href="styles.css?v=1.0">
+<link rel="icon" href="favicon.svg?v=1.1" type="image/svg+xml">
+<link rel="stylesheet" href="styles.css?v=1.1">
 </head>
 <body>
 <main class="desk">
@@ -15,23 +15,13 @@
       <span class="title">Screentone</span>
       <span class="version" id="version"></span>
     </div>
-    <div class="heat" role="group" aria-label="수위">
-      <span class="heat-label">수위</span>
-      <button type="button" class="heat-step" data-level="1">1 순하게</button>
-      <button type="button" class="heat-step" data-level="2">2 보통</button>
-      <button type="button" class="heat-step" data-level="3">3 세게</button>
-    </div>
     <button type="button" id="bookBtn" class="nib">태그 모음</button>
     <button type="button" id="helpBtn" class="nib">도움말</button>
-    <button type="button" id="spinBtn" class="ink" disabled title="잠그지 않은 줄 전부 다시 뽑기 (Space)">
-      돌리기 <kbd>Space</kbd>
-    </button>
   </header>
 
   <section class="conti">
     <div class="conti-head">
       <span>콘티</span>
-      <div class="presets" id="presets" role="group" aria-label="프리셋"></div>
       <span class="conti-count" id="rowCount"></span>
     </div>
     <div class="rows" id="rows"></div>
@@ -42,8 +32,7 @@
     <div class="margin-top">
       <span class="printed">쪽</span>
       <span class="song-no" id="songNo">No. ----</span>
-      <span class="printed">효과</span>
-      <div class="switches" id="switches"></div>
+      <button type="button" class="scene-summary" id="sceneSummary" title="장면 지시 열기">장면 지시 열기</button>
     </div>
 
     <div class="frame">
@@ -58,11 +47,11 @@
         <div class="part-head">
           <span class="caption">A · 하는 쪽</span>
           <span class="who" id="whoA"></span>
-          <button type="button" class="nib small" id="swapBtn" title="A · B 성별 서로 바꾸기">A ⇄ B</button>
           <button type="button" class="nib small copy" data-copy="a">복사</button>
         </div>
         <p class="lyric" id="lyricA"></p>
       </article>
+      <button type="button" class="swap" id="swapBtn" title="A · B 성별 서로 바꾸기" aria-label="A와 B 성별 바꾸기"><span>⇄</span>바꾸기</button>
       <article class="part" data-part="b">
         <div class="part-head">
           <span class="caption">B · 받는 쪽</span>
@@ -73,10 +62,18 @@
       </article>
     </div>
 
+    <div class="actions">
+      <button type="button" id="sceneBtn" class="nib strong">장면 지시</button>
+      <p class="status" id="status" aria-live="polite"></p>
+      <button type="button" class="nib" id="copyAllBtn" disabled>세 칸 전부 복사</button>
+      <button type="button" id="spinBtn" class="ink" disabled title="잠그지 않은 줄 전부 다시 뽑기 (Space)">
+        돌리기 <kbd>Space</kbd>
+      </button>
+    </div>
     <div class="queue">
       <div class="queue-head">
         <span>받은 컷</span>
-        <button type="button" class="nib small" id="copyAllBtn" disabled>세 칸 전부 복사</button>
+        <button type="button" class="nib small" id="histBtn" title="기본 · A · B를 큰 글씨로 펼쳐 보기">크게 보기</button>
         <button type="button" class="nib small" id="histTxt" disabled>TXT</button>
         <button type="button" class="nib small" id="histMd" disabled>MD</button>
         <button type="button" class="nib small" id="histNote" disabled>노트</button>
@@ -84,64 +81,141 @@
       <ol class="queue-list" id="queue"></ol>
       <p class="queue-empty" id="queueEmpty">돌린 기록. 최근 20개</p>
     </div>
-    <p class="status" id="status" aria-live="polite"></p>
   </section>
 </main>
 
-<dialog class="book" id="book">
-  <div class="book-head">
-    <h2>태그 모음</h2>
-    <input type="search" id="bookFind" class="book-find" placeholder="태그나 뜻으로 찾기" autocomplete="off">
-    <label class="book-filter"><input type="checkbox" id="bookOfficial"> 단부루 태그만</label>
-    <span class="book-count" id="bookCount"></span>
-    <form method="dialog"><button class="nib">닫기</button></form>
+<dialog class="scene" id="scene" aria-labelledby="sceneTitle">
+  <div class="sheet-box">
+    <div class="box-head">
+      <h2 id="sceneTitle">장면 지시</h2>
+      <span class="scene-hint">고른 것은 잠금 · 나머지는 돌릴 때마다 랜덤</span>
+      <form method="dialog"><button class="x" aria-label="닫기" title="닫기 (Esc)">✕</button></form>
+    </div>
+    <div class="scene-body">
+      <div id="sceneBody"></div>
+      <div class="scene-group">
+        <span class="scene-label">효과</span>
+        <div class="switches" id="switches"></div>
+      </div>
+    </div>
+    <div class="scene-foot"><button type="button" id="sceneGo" class="ink">이대로 돌리기</button></div>
   </div>
-  <div class="book-list" id="bookList"></div>
 </dialog>
 
-<dialog class="help" id="help">
-  <h2>쓰는 법</h2>
-  <p class="help-lead">태그를 뽑아 NovelAI 주문서를 대신 써 주는 기계. 오른쪽 원고의 컷 셋이 NovelAI의 칸 셋</p>
-  <dl class="help-map">
-    <dt>위 큰 컷</dt><dd>기본 프롬프트. 인원 · 구도 · 장소처럼 장면 전체</dd>
-    <dt>A 컷</dt><dd>하는 쪽 캐릭터 칸</dd>
-    <dt>B 컷</dt><dd>받는 쪽 캐릭터 칸</dd>
-  </dl>
+<dialog class="hist" id="hist" aria-labelledby="histTitle">
+  <div class="sheet-box">
+    <div class="box-head">
+      <h2 id="histTitle">받은 컷</h2>
+      <span class="hist-hint">최근 20개 · 다시 열면 그때 그대로</span>
+      <form method="dialog"><button class="x" aria-label="닫기" title="닫기 (Esc)">✕</button></form>
+    </div>
+    <div class="hist-body">
+      <ol class="hist-list" id="queueBig"></ol>
+      <p class="queue-empty" id="queueBigEmpty">아직 돌린 기록 없음</p>
+    </div>
+  </div>
+</dialog>
 
-  <h3>처음 한 장</h3>
-  <ol class="help-steps">
-    <li>콘티 위 프리셋 하나 누르기</li>
-    <li><b>돌리기</b> 또는 Space</li>
-    <li>컷마다 <b>복사</b> → NovelAI의 같은 칸에 붙여넣기</li>
-  </ol>
+<dialog class="book" id="book" aria-labelledby="bookTitle">
+  <div class="sheet-box">
+    <div class="box-head">
+      <h2 id="bookTitle">태그 모음</h2>
+      <input type="search" id="bookFind" class="book-find" placeholder="태그나 뜻으로 찾기" autocomplete="off">
+      <label class="book-filter"><input type="checkbox" id="bookOfficial"> 단부루 태그만</label>
+      <span class="book-count" id="bookCount"></span>
+      <form method="dialog"><button class="x" aria-label="닫기" title="닫기 (Esc)">✕</button></form>
+    </div>
+    <div class="book-cats" id="bookCats" role="group" aria-label="카테고리"></div>
+    <div class="book-list" id="bookList"></div>
+  </div>
+</dialog>
 
-  <h3>만들고 싶은 그림별</h3>
-  <dl class="help-map">
-    <dt>흑백 성인 만화 컷</dt><dd><b>야망가</b> 프리셋</dd>
-    <dt>다정한 장면</dt><dd><b>순애</b> 프리셋. 수위 1</dd>
-    <dt>구속 · 거친 장면</dt><dd><b>하드</b> 프리셋. 또는 <b>도구&nbsp;· 구속</b> 줄 ☑</dd>
-    <dt>체위 하나 고정</dt><dd>체위 줄의 태그 글자 누르기 → 목록에서 고르기. 고르면 잠김. 흐린 값은 다른 줄과 안 맞는 것</dd>
-    <dt>속옷 · 장소 넣기</dt><dd>그 줄 앞 ☑ 켜기. 처음엔 꺼진 줄</dd>
-    <dt>옷 입히기</dt><dd><b>옷</b> 줄 ☑ 켜기. 장소에 맞는 옷(책상 → 오피스 룩, 욕실 → 목욕가운, 침대 → 잠옷). 옷 상태가 nude면 비어 있음</dd>
-    <dt>남녀 역할 바꾸기</dt><dd>A 컷의 <b>A&nbsp;⇄&nbsp;B</b></dd>
-    <dt>검열 방식</dt><dd><b>검열</b> 줄에서 막대 · 모자이크 · 흰 빛 · 흰칠</dd>
-    <dt>하트 눈 · 투시 같은 효과</dt><dd>원고 위 효과 단추. 누를 때마다 끔 → 켬 → 반반</dd>
-    <dt>태그 뜻 찾기</dt><dd><b>태그 모음</b>. 찾기 칸에 "키스"처럼 입력</dd>
-  </dl>
+<dialog class="help" id="help" aria-labelledby="helpTitle">
+  <div class="sheet-box">
+    <div class="box-head">
+      <h2 id="helpTitle">도움말</h2>
+      <div class="help-tabs" role="tablist">
+        <button type="button" role="tab" class="help-tab" data-tab="start" aria-selected="true">시작</button>
+        <button type="button" role="tab" class="help-tab" data-tab="want" aria-selected="false">그림별</button>
+        <button type="button" role="tab" class="help-tab" data-tab="keys" aria-selected="false">단추</button>
+        <button type="button" role="tab" class="help-tab" data-tab="fit" aria-selected="false">어울림</button>
+      </div>
+      <form method="dialog"><button class="x" aria-label="닫기" title="닫기 (Esc)">✕</button></form>
+    </div>
 
-  <h3>단추</h3>
-  <dl class="help-map">
-    <dt>◇ · ◆</dt><dd>잠금. 돌려도 그 값 유지</dd>
-    <dt>🎲</dt><dd>그 줄만 다시 뽑기</dd>
-    <dt>☑</dt><dd>그 줄을 프롬프트에 넣기 · 빼기</dd>
-    <dt>||</dt><dd>값 여러 개를 묶어 NovelAI가 그림마다 하나 고르기</dd>
-    <dt>기본 · A · B</dt><dd>그 줄이 들어갈 컷. 누를 때마다 바뀜</dd>
-    <dt>A→B</dt><dd>A 컷에 <code>source#</code>, B 컷에 <code>target#</code>. 서로 하는 동작은 두 컷 다 <code>mutual#</code></dd>
-    <dt>●●○</dt><dd>그 태그의 강도. 수위보다 센 태그는 랜덤에서 제외</dd>
-    <dt>어울림</dt><dd>인원 · 장소 · 옷 상태 · 체위에 맞는 값만 뽑기. 여자 둘에 남성기, 차 안에 서서 하는 체위 같은 조합은 안 나옴. 잠근 값에 나머지가 맞춤</dd>
-    <dt>받은 컷</dt><dd>돌린 기록 20개. 누르면 그때 그대로 다시 열기</dd>
-  </dl>
-  <form method="dialog"><button class="nib">닫기</button></form>
+    <section class="help-panel" data-panel="start" role="tabpanel">
+      <p class="help-lead">태그를 뽑아 NovelAI 주문서를 대신 써 주는 기계. 오른쪽 원고의 컷 셋이 NovelAI의 칸 셋</p>
+      <dl class="help-map">
+        <dt>위 큰 컷</dt><dd>기본 프롬프트. 인원 · 구도 · 장소처럼 장면 전체</dd>
+        <dt>A 컷</dt><dd>하는 쪽 캐릭터 칸</dd>
+        <dt>B 컷</dt><dd>받는 쪽 캐릭터 칸</dd>
+      </dl>
+      <h3>처음 한 장</h3>
+      <ol class="help-steps">
+        <li>컷 아래 <b>장면 지시</b>에서 누가 · 어디서 · 자세 고르기</li>
+        <li><b>이대로 돌리기</b> 또는 Space</li>
+        <li>컷마다 <b>복사</b> → NovelAI의 같은 칸에 붙여넣기</li>
+      </ol>
+      <h3>장면 지시</h3>
+      <dl class="help-map">
+        <dt>누가 · 어디서 · 옷 상태 · 그림체</dt><dd>고른 값으로 그 줄을 잠금. 랜덤은 잠금 풀기</dd>
+        <dt>자세</dt><dd>체위를 그 자세 안에서만 뽑기</dd>
+        <dt>분위기</dt><dd>순하게 · 보통 · 세게. 수위 1 · 2 · 3</dd>
+        <dt>넣을 것</dt><dd>꺼 둔 줄(옷 · 속옷 · 도구 …) 켜고 끄기</dd>
+        <dt>효과</dt><dd>하트 눈 · 투시 · 말풍선 … 누를 때마다 끔 → 켬 → 반반</dd>
+      </dl>
+    </section>
+
+    <section class="help-panel" data-panel="want" role="tabpanel" hidden>
+      <dl class="help-map">
+        <dt>흑백 성인 만화 컷</dt><dd>장면 지시 · 그림체 <b>흑백 만화</b></dd>
+        <dt>다정한 장면</dt><dd>장면 지시 · 분위기 <b>순하게</b></dd>
+        <dt>구속 · 거친 장면</dt><dd>장면 지시 · 분위기 <b>세게</b>. 또는 넣을 것 <b>도구</b></dd>
+        <dt>체위 하나 고정</dt><dd>체위 줄의 태그 글자 누르기 → 목록에서 고르기. 고르면 잠김</dd>
+        <dt>옷 입히기</dt><dd>장면 지시 · 옷 상태 <b>반쯤</b> · <b>입음</b> + 넣을 것 <b>옷</b>. 장소에 맞는 옷(책상 → 오피스 룩, 욕실 → 목욕가운, 침대 → 잠옷)</dd>
+        <dt>특정 장소에서</dt><dd>장면 지시 · 어디서. 온천 · 차 · 교실 …</dd>
+        <dt>남녀 역할 바꾸기</dt><dd>A · B 컷 사이 <b>⇄</b></dd>
+        <dt>검열 방식</dt><dd><b>검열</b> 줄에서 막대 · 모자이크 · 흰 빛 · 흰칠. 줄 ☑를 끄면 검열 없음</dd>
+        <dt>하트 눈 · 투시 같은 효과</dt><dd>장면 지시 · 효과. 누를 때마다 끔 → 켬 → 반반</dd>
+        <dt>센 태그 빼기</dt><dd>장면 지시 · 분위기 <b>순하게</b> · <b>보통</b></dd>
+        <dt>태그 뜻 찾기</dt><dd><b>태그 모음</b>. 찾기 칸에 "키스"처럼 입력</dd>
+      </dl>
+    </section>
+
+    <section class="help-panel" data-panel="keys" role="tabpanel" hidden>
+      <dl class="help-map">
+        <dt>◇ · ◆</dt><dd>잠금. 돌려도 그 값 유지</dd>
+        <dt>🎲</dt><dd>그 줄만 다시 뽑기</dd>
+        <dt>☑</dt><dd>그 줄을 프롬프트에 넣기 · 빼기</dd>
+        <dt>태그 글자</dt><dd>목록에서 직접 고르기. 고르면 잠김. 흐린 값은 다른 줄과 안 맞는 것</dd>
+        <dt>||</dt><dd>값 여러 개를 묶어 NovelAI가 그림마다 하나 고르기</dd>
+        <dt>기본 · A · B</dt><dd>그 줄이 들어갈 컷. 누를 때마다 바뀜</dd>
+        <dt>A→B</dt><dd>A 컷에 <code>source#</code>, B 컷에 <code>target#</code>. 서로 하는 동작은 두 컷 다 <code>mutual#</code></dd>
+        <dt>●●○</dt><dd>그 태그의 강도. 분위기(수위)보다 센 태그는 랜덤에서 제외</dd>
+        <dt>⇄ 바꾸기</dt><dd>A · B 컷 사이. 두 사람의 성별 서로 바꾸기</dd>
+        <dt>받은 컷</dt><dd>컷 아래 목록. 돌린 기록 20개. 누르면 그때 그대로 다시 열기. 크게 보기 · TXT · MD · 노트</dd>
+        <dt>Space</dt><dd>돌리기</dd>
+      </dl>
+    </section>
+
+    <section class="help-panel" data-panel="fit" role="tabpanel" hidden>
+      <p class="help-lead">이미 정해진 값과 맞는 것만 뽑기. 잠근 값이 이기고 나머지가 맞춤. 맞는 값이 없는 줄은 비고, 어느 줄 때문인지 표시</p>
+      <dl class="help-map">
+        <dt>인원</dt><dd>여자 둘에 남성기 · 펠라 없음. 혼자면 상대 동작 없음</dd>
+        <dt>장소</dt><dd>차 · 욕조 · 소파에 서서 하거나 들어 올리는 체위 없음</dd>
+        <dt>자세</dt><dd>서서 하는 체위에 누운 몸 자세 없음</dd>
+        <dt>마주 봄</dt><dd>뒤에서 하는 체위에 키스 · 목에 팔 두르기 · 눈 맞춤 없음</dd>
+        <dt>옷</dt><dd>nude에 옷 · 옷 세부 없음. 치마 없는 옷에 skirt lift 없음. 장소에 맞는 옷만</dd>
+        <dt>입 · 손</dt><dd>펠라 중 키스 없음. 재갈에 입 동작 없음. 묶인 손에 손 쓰는 동작 없음</dd>
+        <dt>시점</dt><dd>넣기 직전 · 하는 중 · 끝난 뒤(after …) 중 하나만</dd>
+      </dl>
+      <h3>A · B 칸</h3>
+      <dl class="help-map">
+        <dt>여자가 하는 동작</dt><dd>펠라 · 파이즈리 · 기승위 같은 동작은 남녀일 때 여자 쪽에 <code>source#</code></dd>
+        <dt>another …</dt><dd>상대가 나에게 하는 태그. 받는 쪽에만</dd>
+      </dl>
+    </section>
+  </div>
 </dialog>
 
 <script>
@@ -151,8 +225,8 @@
     if (e && !e.hidden) e.textContent = '화면을 다 불러오지 못했어요. Ctrl+F5로 새로고침해 주세요.';
   });
 </script>
-<script src="data.js?v=1.0"></script>
-<script src="note.js?v=1.0"></script>
-<script src="app.js?v=1.0"></script>
+<script src="data.js?v=1.1"></script>
+<script src="note.js?v=1.1"></script>
+<script src="app.js?v=1.1"></script>
 </body>
 </html>

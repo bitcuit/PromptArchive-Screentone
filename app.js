@@ -6,7 +6,7 @@
 
 const STORE = 'screentone:v1';
 // 올릴 때 index.html의 ?v= 도 같이 바꾼다(브라우저가 예전 파일을 섞어 쓰지 않게)
-const VERSION = '1.0';
+const VERSION = '1.1';
 const EDITION = 'Screentone';
 const DIR_NAME = /\[?\s*A\s*(→|->)\s*B\s*\]?/i;
 const BASE_NAME = /인원|드러난|구도|검열|카메라|배경|장소|품질|화풍/;
@@ -30,7 +30,8 @@ let state = {
   route: {},        // key → 'base' | 'a' | 'b' (방향 없는 줄만)
   level: 3,
   swap: false,
-  off: {},          // key → true: 사용자 · 프리셋이 끈 줄
+  off: {},          // key → true: 사용자 · 장면 지시가 끈 줄
+  poseWant: '',     // 장면 지시의 자세(lie · kneel · sit · stand). 비면 아무 자세
 };
 
 /* ---------- 읽기 ---------- */
@@ -175,6 +176,8 @@ function clash(r, q) {
   if ((r.mouth === 'oral' && q.mouth === 'kiss') || (r.mouth === 'kiss' && q.mouth === 'oral')) return true;
   if ((r.mouth === 'gag' && q.mouth) || (q.mouth === 'gag' && r.mouth)) return true;
   if ((r.bound && q.hands) || (q.bound && r.hands)) return true;
+  // 등을 지고 하는 자세에 마주 보는 동작(키스 · 목에 팔 두르기 · 눈 맞춤)은 안 됨
+  if (r.face && q.face && r.face !== q.face) return true;
   if ((r.at && q.place && !r.at.includes(q.place)) || (q.at && r.place && !q.at.includes(r.place))) return true;
   if ((r.garb && q.has && !q.has.includes(r.garb)) || (q.garb && r.has && !r.has.includes(q.garb))) return true;
   // 넣기 직전 · 하는 중 · 끝난 뒤는 한 장에 하나만
@@ -186,6 +189,7 @@ function clash(r, q) {
 
 // picks: 이미 정해진 줄의 값. c 줄에 t를 넣어도 그 값들과 맞는가
 function fits(c, t, picks) {
+  if (state.poseWant && /^체위/.test(c.name) && ruleOf(c, t).pose !== state.poseWant) return false;
   const ctx = { ...picks, [c.key]: t };
   const who = castOf(ctx);
   if (!needOk(c, t, who)) return false;
@@ -245,7 +249,6 @@ function setLevel(n) {
   // 잠그지 않은 줄 중 새 수위를 넘거나 안 맞는 값만 다시 뽑는다. 직접 고른(잠근) 값은 그대로
   settle();
   save();
-  renderLevel();
   renderRows();
   renderLyrics();
 }
@@ -337,8 +340,6 @@ function render() {
   const has = state.categories.length > 0;
   els.empty.hidden = has;
   els.spin.disabled = !has;
-  renderLevel();
-  renderPresets();
   renderRows();
   renderSwitches();
   renderLyrics();
@@ -348,61 +349,133 @@ function render() {
 const sameName = (a, b) => bareName(a.replace(/^-/, '')) === bareName(b.replace(/^-/, ''));
 const swName = (t) => t.name.replace(/\s*\(.*\)\s*$/, '');
 
-function applyPreset(p) {
-  // 프리셋끼리 쌓이지 않게 켜고 끄기 · 스위치는 처음 상태(- 꺼 둔 줄 · 스위치 처음)로 되돌린 뒤 적용한다.
-  // 잠금은 사용자가 정한 것이라 그대로 두고, 프리셋이 직접 고르는 값만 잠근다
-  for (const c of state.categories) {
-    delete state.bundle[c.key];
-    if (c.startOff) state.off[c.key] = true; else delete state.off[c.key];
+/* ---------- 장면 지시 (팝업 카드) ---------- */
+// 카드 하나가 줄 하나를 그 값으로 잠그거나, 켜고 끄거나, 수위 · 자세를 정한다.
+// 고른 것은 잠기고 나머지는 돌릴 때마다 랜덤. '랜덤' 카드는 그 줄의 잠금을 푼다
+const MONO = 'monochrome, greyscale, comic, halftone, emphasis lines, sound effects';
+const SCENE = [
+  { label: '누가', row: /인원/, random: true, cards: [['남녀', '1girl, 1boy, hetero'], ['여+여', '2girls, yuri'], ['남+남', '2boys, yaoi'],
+    ['혼자 여', '1girl, solo'], ['혼자 남', '1boy, solo'], ['여2 · 남1', '2girls, 1boy, ffm threesome'], ['남2 · 여1', '1girl, 2boys, mmf threesome']] },
+  { label: '어디서', row: /장소/, none: '없음', random: true, cards: [['침대', 'on bed, bed sheet, pillow'], ['침실', 'bedroom'], ['욕실', 'bathroom'],
+    ['욕조', 'bath'], ['온천', 'onsen'], ['소파', 'couch'], ['차', 'car'], ['교실', 'classroom'], ['책상', 'desk'], ['러브호텔', 'love hotel'], ['실내', 'indoors']] },
+  { label: '자세', kind: 'pose', cards: [['랜덤', ''], ['누워서', 'lie'], ['엎드려서', 'kneel'], ['올라타서', 'sit'], ['서서', 'stand']] },
+  { label: '옷 상태', row: /옷 상태/, random: true, cards: [['벗음', 'nude'], ['반쯤', 'partially clothed'], ['입음', 'fully clothed']] },
+  { label: '분위기', kind: 'mood', cards: [['순하게', 1], ['보통', 2], ['세게', 3]] },
+  { label: '그림체', row: /화풍/, none: '안 정함', cards: [['흑백 만화', MONO], ['애니 채색', 'anime coloring'], ['동인지 표지', 'doujin cover'],
+    ['수채', 'watercolor (medium)'], ['스케치', 'sketch']] },
+  { label: '넣을 것', kind: 'rows', cards: [['옷', /^옷$/], ['속옷', /^속옷$/], ['옷 세부', /옷 세부/], ['도구', /도구/], ['표정', /^표정$/],
+    ['몸 자세', /몸 자세/], ['체위 조합', /체위 조합/], ['행위', /^행위/]] },
+];
+const rowOf = (re) => (re ? state.categories.find((c) => re.test(c.name)) : null);
+const swOf = (name) => state.toggles.find((t) => swName(t) === name);
+function setRow(c, on) {
+  if (!c) return;
+  if (on) { delete state.use[c.key]; delete state.off[c.key]; } else { state.use[c.key] = false; state.off[c.key] = true; }
+  delete state.bundle[c.key];
+}
+const swOn = (name) => { const t = swOf(name); if (t) state.sw[t.name] = true; };
+
+// 그 묶음에서 지금 눌린 카드: 값 · 'random' · 'none'
+function sceneNow(g) {
+  if (g.kind === 'pose') return state.poseWant || '';
+  if (g.kind === 'mood') return state.level;
+  if (!g.row) return null;
+  const c = rowOf(g.row);
+  if (!c || !active(c)) return 'none';
+  if (!state.lock[c.key]) return 'random';
+  return state.pick[c.key];
+}
+
+function applyCard(g, value) {
+  if (g.kind === 'pose') {
+    state.poseWant = value;
+    // 자세를 정했으면 체위 줄의 잠금을 풀어 그 자세 안에서 다시 뽑게 한다
+    if (value) for (const c of state.categories) if (/^체위/.test(c.name)) delete state.lock[c.key];
+  } else if (g.kind === 'mood') {
+    state.level = value;
+    if (value === 1) { swOn('하트'); setRow(rowOf(/도구/), false); }
+    if (value === 3) { swOn('땀'); setRow(rowOf(/도구/), true); setRow(rowOf(/^표정$/), true); }
+  } else if (g.kind === 'rows') {
+    const c = rowOf(value);
+    setRow(c, !(c && active(c)));
+  } else {
+    const c = rowOf(g.row);
+    if (!c) return;
+    if (value === 'none') setRow(c, false);
+    else if (value === 'random') { setRow(c, true); delete state.lock[c.key]; }
+    else { setRow(c, true); state.pick[c.key] = value; state.lock[c.key] = true; }
+    if (value === MONO) { swOn('말풍선'); swOn('움직임 선'); }
   }
-  for (const t of state.toggles) state.sw[t.name] = t.start;
-  state.swap = false;
-  if (p.level) state.level = p.level;
-  const all = p.on.includes('전부');
-  for (const c of state.categories) {
-    if (all || p.on.some((n) => sameName(n, c.name))) delete state.off[c.key];
-    if (p.off.some((n) => sameName(n, c.name))) state.off[c.key] = true;
-    if (state.off[c.key]) state.use[c.key] = false; else delete state.use[c.key];
-  }
-  for (const t of state.toggles) {
-    if (p.on.some((n) => n === swName(t) || n === t.name)) state.sw[t.name] = true;
-    if (p.off.some((n) => n === swName(t) || n === t.name)) state.sw[t.name] = false;
-  }
-  for (const [reel, value] of p.picks) {
-    const c = state.categories.find((x) => sameName(reel, x.name));
-    if (!c || !c.items.includes(value)) continue;
-    state.pick[c.key] = value;
-    state.lock[c.key] = true;
-    delete state.use[c.key];
-    delete state.off[c.key];
-    delete state.bundle[c.key];
-  }
-  settle(false);
+  releaseMisfits(g);
+  settle();
   save();
-  render();
-  renderLyrics(true);
-  pushHistory();
-  setStatus(`${p.name} 프리셋을 적용했어요.`);
+  renderRows();
+  renderSwitches();
+  renderLyrics();
 }
 
-function renderPresets() {
-  const box = $('presets');
-  box.textContent = '';
-  for (const p of (state.meta.presets || [])) {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'preset';
-    b.textContent = p.name;
-    b.title = p.note;
-    b.addEventListener('click', () => applyPreset(p));
-    box.append(b);
+// 카드는 방금 직접 고른 값이라 이긴다. 그 값과 안 맞게 된 다른 줄의 잠금은 풀어서 맞춰 바뀌게 한다(맞는 잠금은 그대로)
+function releaseMisfits(g) {
+  const mine = g.row ? rowOf(g.row) : null;
+  for (const c of state.categories) {
+    if (c === mine || !active(c) || !state.lock[c.key]) continue;
+    // 잠긴 줄끼리만 본다. 잠기지 않은 줄은 settle이 새로 맞추니 옛 값으로 판단하지 않는다
+    const others = Object.fromEntries(state.categories
+      .filter((d) => d !== c && active(d) && state.lock[d.key] && state.pick[d.key]).map((d) => [d.key, state.pick[d.key]]));
+    const v = state.pick[c.key];
+    if (!fits(c, v, others) || levelOf(c, v) > state.level) delete state.lock[c.key];
   }
 }
 
-function renderLevel() {
-  document.querySelectorAll('.heat-step[data-level]').forEach((b) => {
-    b.setAttribute('aria-pressed', String(Number(b.dataset.level) === state.level));
-  });
+function sceneCard(label, pressed, onClick, soft) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'card' + (soft ? ' soft' : '');
+  b.textContent = label;
+  b.setAttribute('aria-pressed', String(pressed));
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+function renderScene() {
+  const box = $('sceneBody');
+  if (!box || !state.categories.length) return;
+  box.textContent = '';
+  for (const g of SCENE) {
+    const now = sceneNow(g);
+    const row = document.createElement('div');
+    row.className = 'scene-group';
+    const label = document.createElement('span');
+    label.className = 'scene-label';
+    label.textContent = g.label;
+    const cards = document.createElement('div');
+    cards.className = 'cards';
+    if (g.none) cards.append(sceneCard(g.none, now === 'none', () => applyCard(g, 'none'), true));
+    if (g.random) cards.append(sceneCard('랜덤', now === 'random', () => applyCard(g, 'random'), true));
+    for (const [text, value] of g.cards) {
+      let pressed = now === value;
+      if (g.kind === 'rows') { const c = rowOf(value); pressed = !!c && active(c); }
+      cards.append(sceneCard(text, pressed, () => applyCard(g, value), g.kind === 'pose' && value === ''));
+    }
+    row.append(label, cards);
+    box.append(row);
+  }
+  renderSceneSummary();
+}
+
+// 원고 위 여백의 한 줄: 정해 둔 지시만 모아 보여 주고, 누르면 팝업이 열린다
+function renderSceneSummary() {
+  const parts = [];
+  for (const g of SCENE) {
+    if (g.kind === 'rows') continue;
+    const now = sceneNow(g);
+    const card = g.cards.find(([, v]) => v === now);
+    if (card && !(g.kind === 'pose' && !now)) parts.push(card[0]);
+  }
+  const el = $('sceneSummary');
+  if (el) el.textContent = parts.length ? `장면 지시 · ${parts.join(' · ')}` : '장면 지시 열기';
+  const btn = $('sceneBtn');
+  if (btn) btn.title = parts.length ? `지금 지시: ${parts.join(' · ')}` : '누가 · 어디서 · 자세 · 분위기 정하기';
 }
 
 const ROUTE_NEXT = { base: 'a', a: 'b', b: 'base' };
@@ -427,6 +500,7 @@ function renderRows() {
     els.rows.append(makeRow(c, no));
   }
   els.rowCount.textContent = state.categories.length ? `${state.categories.length}줄` : '';
+  renderScene();
 }
 
 function makeRow(c, no) {
@@ -732,11 +806,27 @@ function pushHistory() {
     code: songNo(text),
     snap: JSON.parse(JSON.stringify({
       pick: state.pick, lock: state.lock, use: state.use, sw: state.sw, bundle: state.bundle,
-      route: state.route, level: state.level, swap: state.swap, off: state.off,
+      route: state.route, level: state.level, swap: state.swap, off: state.off, poseWant: state.poseWant,
     })),
   });
   if (received.length > 20) received.length = 20;
   renderHistory();
+}
+
+function reopen(h) {
+  Object.assign(state, JSON.parse(JSON.stringify(h.snap)));
+  save(); render();
+  if ($('hist').open) $('hist').close();
+  setStatus(`${h.code}번을 다시 열었어요.`);
+}
+
+function smallButton(text, onClick) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'nib small';
+  b.textContent = text;
+  b.addEventListener('click', onClick);
+  return b;
 }
 
 function renderHistory() {
@@ -759,19 +849,53 @@ function renderHistory() {
     m.className = 'q-meta';
     m.textContent = `${h.meta} · ${h.at.slice(11)}`;
     open.append(no, t, m);
-    open.addEventListener('click', () => {
-      Object.assign(state, JSON.parse(JSON.stringify(h.snap)));
-      save(); render();
-      setStatus(`${h.code}번을 다시 열었어요.`);
-    });
-    const copy = document.createElement('button');
-    copy.type = 'button';
-    copy.className = 'nib small';
-    copy.textContent = '복사';
-    copy.addEventListener('click', () => copyText(h.prompt, '세 칸을 한꺼번에 복사했어요.'));
-    li.append(open, copy);
+    open.addEventListener('click', () => reopen(h));
+    li.append(open, smallButton('복사', () => copyText(h.prompt, '세 칸을 한꺼번에 복사했어요.')));
     els.queue.append(li);
   });
+  renderHistoryBig();
+}
+
+// 크게 보기: 기록마다 기본 · A · B를 다 펼쳐서 읽기 쉽게. 칸마다 복사
+function renderHistoryBig() {
+  const list = $('queueBig');
+  if (!list) return;
+  list.textContent = '';
+  $('queueBigEmpty').hidden = received.length > 0;
+  for (const h of received) {
+    const li = document.createElement('li');
+    li.className = 'hist-item';
+    const head = document.createElement('div');
+    head.className = 'hist-item-head';
+    const no = document.createElement('span');
+    no.className = 'q-no';
+    no.textContent = h.code;
+    const t = document.createElement('span');
+    t.className = 'q-title';
+    t.textContent = h.title + (h.sub ? ` — ${h.sub}` : '');
+    const m = document.createElement('span');
+    m.className = 'q-meta';
+    m.textContent = `${h.meta} · ${h.at.slice(11)}`;
+    head.append(no, t, m, smallButton('다시 열기', () => reopen(h)), smallButton('전부 복사', () => copyText(h.prompt, '세 칸을 한꺼번에 복사했어요.')));
+    li.append(head);
+    for (const line of h.prompt.split('\n')) {
+      const i = line.indexOf(': ');
+      const name = line.slice(0, i);
+      const text = line.slice(i + 2);
+      const part = document.createElement('div');
+      part.className = 'hist-part';
+      const b = document.createElement('b');
+      b.textContent = name;
+      const span = document.createElement('span');
+      span.textContent = text;
+      part.append(b, span);
+      part.title = '눌러서 이 칸만 복사';
+      part.style.cursor = 'copy';
+      part.addEventListener('click', () => copyText(text, `${name} 칸을 복사했어요.`));
+      li.append(part);
+    }
+    list.append(li);
+  }
 }
 
 const noteEntries = () => received.map((h) => ({
@@ -799,13 +923,12 @@ function validate() {
   for (const c of state.categories) {
     for (const t of c.items) if (!metaOf('ko', c, t)) warn.push(`뜻 없음: ${c.name} · ${t}`);
   }
-  const named = (n) => state.categories.some((c) => sameName(n, c.name)) || state.toggles.some((t) => n === swName(t) || n === t.name);
-  for (const p of state.meta.presets || []) {
-    for (const [reel, v] of p.picks) {
-      const c = state.categories.find((x) => sameName(reel, x.name));
-      if (!c || !c.items.includes(v)) warn.push(`프리셋 ${p.name}: 없는 값 ${reel}=${v}`);
-    }
-    for (const n of [...p.on, ...p.off]) if (n !== '전부' && !named(n)) warn.push(`프리셋 ${p.name}: 없는 줄 · 스위치 ${n}`);
+  for (const g of SCENE) {
+    if (g.kind === 'rows') { for (const [t, re] of g.cards) if (!rowOf(re)) warn.push(`장면 지시 ${g.label}: 없는 줄 ${t}`); continue; }
+    if (!g.row) continue;
+    const c = rowOf(g.row);
+    if (!c) { warn.push(`장면 지시 ${g.label}: 없는 줄`); continue; }
+    for (const [t, v] of g.cards) if (!c.items.includes(v)) warn.push(`장면 지시 ${g.label} · ${t}: 없는 값 ${v}`);
   }
   // 둘 이상인 인원마다 체위 줄에 고를 값이 남는지
   const castRow = state.categories.find((c) => /인원/.test(c.name));
@@ -852,6 +975,7 @@ function load() {
   // 예전 버그로 수위가 숫자가 아니게 저장됐으면 3으로 되돌린다
   if (![1, 2, 3].includes(state.level)) state.level = 3;
   delete state.mixRows;
+  if (!['', 'lie', 'kneel', 'sit', 'stand'].includes(state.poseWant)) state.poseWant = '';
 }
 
 async function copyText(text, done) {
@@ -874,11 +998,41 @@ document.querySelectorAll('.copy').forEach((b) => {
 });
 els.copyAll.addEventListener('click', () => copyText(combined(current), '세 칸을 한꺼번에 복사했어요.'));
 els.swap.addEventListener('click', () => { state.swap = !state.swap; settle(); save(); renderRows(); renderLyrics(); });
-document.querySelectorAll('.heat-step[data-level]').forEach((b) => b.addEventListener('click', () => setLevel(Number(b.dataset.level))));
 $('histTxt').addEventListener('click', () => PANote.download(`screentone-${fileStamp()}.txt`, PANote.toTxt(noteEntries()), 'text/plain;charset=utf-8'));
 $('histMd').addEventListener('click', () => PANote.download(`screentone-${fileStamp()}.md`, PANote.toMd(noteEntries()), 'text/markdown;charset=utf-8'));
 $('histNote').addEventListener('click', () => PANote.download(`prompt-archive-note-${fileStamp()}.html`, PANote.toHtml(noteEntries()), 'text/html;charset=utf-8'));
-els.helpBtn.addEventListener('click', () => els.help.showModal());
+const scene = $('scene');
+const openScene = () => { renderScene(); scene.showModal(); };
+$('sceneBtn').addEventListener('click', openScene);
+$('sceneSummary').addEventListener('click', openScene);
+$('histBtn').addEventListener('click', () => $('hist').showModal());
+$('sceneGo').addEventListener('click', () => { scene.close(); spin(); });
+
+els.helpBtn.addEventListener('click', () => {
+  els.help.showModal();
+  // 처음 초점이 첫 탭에 가서 다른 탭을 고른 것처럼 보이지 않게, 지금 탭에 초점
+  document.querySelector('.help-tab[aria-selected="true"]').focus();
+});
+
+// 도움말 탭. 좌우 화살표로도 넘김
+function showHelpTab(name) {
+  document.querySelectorAll('.help-tab').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.tab === name)));
+  document.querySelectorAll('.help-panel').forEach((p) => { p.hidden = p.dataset.panel !== name; });
+}
+document.querySelectorAll('.help-tab').forEach((t) => t.addEventListener('click', () => showHelpTab(t.dataset.tab)));
+els.help.addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+  const tabs = [...document.querySelectorAll('.help-tab')];
+  const i = tabs.findIndex((t) => t.getAttribute('aria-selected') === 'true');
+  const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+  showHelpTab(next.dataset.tab);
+  next.focus();
+});
+
+// 창 바깥(어두운 곳)을 누르면 닫힘. 창 안은 sheet-box가 꽉 채우므로 dialog 자신이 눌리면 바깥이다
+for (const d of document.querySelectorAll('dialog')) {
+  d.addEventListener('click', (e) => { if (e.target === d) d.close(); });
+}
 
 /* ---------- 태그 모음 ---------- */
 
@@ -887,7 +1041,27 @@ const bookList = $('bookList');
 const bookFind = $('bookFind');
 const bookOfficial = $('bookOfficial');
 
+// 카테고리 칩: 줄 이름을 태그처럼 늘어놓고 눌러서 거른다(찾기 칸과 같이 걸림). 다시 누르면 풀림
+let bookCat = '';
+function renderBookCats() {
+  const box = $('bookCats');
+  box.textContent = '';
+  const chip = (label, key, n) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'cat-chip';
+    b.setAttribute('aria-pressed', String(bookCat === key));
+    b.textContent = label;
+    if (n != null) { const s = document.createElement('span'); s.className = 'n'; s.textContent = n; b.append(s); }
+    b.addEventListener('click', () => { bookCat = bookCat === key || !key ? '' : key; renderBook(); });
+    return b;
+  };
+  box.append(chip('전체', '', null));
+  for (const c of state.categories) box.append(chip(bareName(c.name), c.key, c.items.length));
+}
+
 function renderBook() {
+  renderBookCats();
   const q = bookFind.value.trim().toLowerCase();
   const only = bookOfficial.checked;
   bookList.textContent = '';
@@ -895,6 +1069,7 @@ function renderBook() {
   let total = 0;
   for (const c of state.categories) {
     total += c.items.length;
+    if (bookCat && c.key !== bookCat) continue;
     const items = c.items.filter((t) => {
       if (only && state.meta.dan && state.meta.dan[metaKey(c.name, t)] === false) return false;
       if (!q) return true;
@@ -910,6 +1085,9 @@ function renderBook() {
     n.textContent = items.length;
     h.append(n);
     sec.append(h);
+    const grid = document.createElement('div');
+    grid.className = 'book-items';
+    sec.append(grid);
     for (const t of items) {
       const b = document.createElement('button');
       b.type = 'button';
@@ -937,9 +1115,15 @@ function renderBook() {
         settle(); save(); renderRows(); renderLyrics(); renderBook();
         setStatus(`${bareName(c.name)} 줄에 '${t}'를 골랐어요.`);
       });
-      sec.append(b);
+      grid.append(b);
     }
     bookList.append(sec);
+  }
+  if (!shown) {
+    const none = document.createElement('p');
+    none.className = 'book-none';
+    none.textContent = `'${bookFind.value.trim()}'에 맞는 태그 없음`;
+    bookList.append(none);
   }
   $('bookCount').textContent = `${shown} / ${total}개`;
 }
