@@ -12,22 +12,13 @@
     <div class="imprint">
       <span class="series">PROMPT ARCHIVE</span>
       <span class="title">Screentone</span>
-    </div>
-    <div class="source">
-      <span class="file" id="fileName">Screentone 태그.xlsx</span>
-      <button type="button" id="reloadBtn" class="nib" title="엑셀 고친 뒤 새로 읽기">다시 읽기</button>
+      <span class="version" id="version"></span>
     </div>
     <div class="heat" role="group" aria-label="수위">
       <span class="heat-label">수위</span>
       <button type="button" class="heat-step" data-level="1">1 순하게</button>
       <button type="button" class="heat-step" data-level="2">2 보통</button>
       <button type="button" class="heat-step" data-level="3">3 세게</button>
-    </div>
-    <div class="heat" role="group" aria-label="줄 섞기" title="돌릴 때 잠그지 않은 줄의 넣기 · 빼기도 뽑기">
-      <span class="heat-label">줄 섞기</span>
-      <button type="button" class="heat-step mix-step" data-mix="0">안 함</button>
-      <button type="button" class="heat-step mix-step" data-mix="0.25">조금</button>
-      <button type="button" class="heat-step mix-step" data-mix="0.5">반반</button>
     </div>
     <button type="button" id="bookBtn" class="nib">태그 모음</button>
     <button type="button" id="helpBtn" class="nib">도움말</button>
@@ -43,7 +34,7 @@
       <span class="conti-count" id="rowCount"></span>
     </div>
     <div class="rows" id="rows"></div>
-    <p class="empty" id="empty">엑셀을 읽는 중이에요.</p>
+    <p class="empty" id="empty">태그를 읽는 중이에요.</p>
   </section>
 
   <section class="sheet" id="screen">
@@ -128,9 +119,9 @@
     <dt>흑백 성인 만화 컷</dt><dd><b>야망가</b> 프리셋</dd>
     <dt>다정한 장면</dt><dd><b>순애</b> 프리셋. 수위 1</dd>
     <dt>구속 · 거친 장면</dt><dd><b>하드</b> 프리셋. 또는 <b>도구&nbsp;· 구속</b> 줄 ☑</dd>
-    <dt>매번 다른 조합</dt><dd><b>줄 섞기</b> 조금 · 반반. 또는 <b>막 섞기</b> 프리셋</dd>
-    <dt>체위 하나 고정</dt><dd>체위 줄의 태그 글자 누르기 → 목록에서 고르기. 고르면 잠김</dd>
+    <dt>체위 하나 고정</dt><dd>체위 줄의 태그 글자 누르기 → 목록에서 고르기. 고르면 잠김. 흐린 값은 다른 줄과 안 맞는 것</dd>
     <dt>속옷 · 장소 넣기</dt><dd>그 줄 앞 ☑ 켜기. 처음엔 꺼진 줄</dd>
+    <dt>옷 입히기</dt><dd><b>옷</b> 줄 ☑ 켜기. 장소에 맞는 옷(책상 → 오피스 룩, 욕실 → 목욕가운, 침대 → 잠옷). 옷 상태가 nude면 비어 있음</dd>
     <dt>남녀 역할 바꾸기</dt><dd>A 컷의 <b>A&nbsp;⇄&nbsp;B</b></dd>
     <dt>검열 방식</dt><dd><b>검열</b> 줄에서 막대 · 모자이크 · 흰 빛 · 흰칠</dd>
     <dt>하트 눈 · 투시 같은 효과</dt><dd>원고 위 효과 단추. 누를 때마다 끔 → 켬 → 반반</dd>
@@ -146,13 +137,13 @@
     <dt>기본 · A · B</dt><dd>그 줄이 들어갈 컷. 누를 때마다 바뀜</dd>
     <dt>A→B</dt><dd>A 컷에 <code>source#</code>, B 컷에 <code>target#</code>. 서로 하는 동작은 두 컷 다 <code>mutual#</code></dd>
     <dt>●●○</dt><dd>그 태그의 강도. 수위보다 센 태그는 랜덤에서 제외</dd>
+    <dt>어울림</dt><dd>인원 · 장소 · 옷 상태 · 체위에 맞는 값만 뽑기. 여자 둘에 남성기, 차 안에 서서 하는 체위 같은 조합은 안 나옴. 잠근 값에 나머지가 맞춤</dd>
     <dt>받은 컷</dt><dd>돌린 기록 20개. 누르면 그때 그대로 다시 열기</dd>
-    <dt>다시 읽기</dt><dd><code>Screentone 태그.xlsx</code>를 고쳐 저장한 뒤 새로 읽기. 잠금 · 스위치는 유지</dd>
   </dl>
   <form method="dialog"><button class="nib">닫기</button></form>
 </dialog>
 
-<script src="vendor/xlsx.full.min.js"></script>
+<script src="data.js"></script>
 <script src="note.js"></script>
 <script src="app.js"></script>
 </body>

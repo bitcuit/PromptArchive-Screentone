@@ -1,16 +1,12 @@
 'use strict';
 
-// 같은 폴더의 'Screentone 태그.xlsx' 한 권 → 줄(랜덤 항목)과 스위치.
-// 그 위에 메모 시트 셋을 더 읽는다(전부 없어도 돌아간다).
-//   #방향: 릴 · 태그 · 방향("A→B" 또는 "서로") → A 칸 source# / B 칸 target# / 두 칸 mutual#
-//   #뜻:   릴 · 태그 · 한국어 뜻 → 줄 아래 작은 글씨
-//   #강도: 릴 · 태그 · 1~3 → 수위보다 높은 값은 랜덤에 나오지 않는다(없는 태그는 1로 본다)
+// data.js(window.SCREENTONE)의 줄 · 스위치 · 프리셋으로 NovelAI 기본 · A · B 칸을 뽑는다.
+// 어울림: 태그마다 data.js에 적힌 성질(need · pose · poses · wear · cover · bare · side · by)로
+// 이미 정해진 값과 맞는 후보만 뽑는다. 잠근 값이 이기고, 나머지가 맞춰 바뀐다.
 
 const STORE = 'screentone:v1';
+const VERSION = '1.0';
 const EDITION = 'Screentone';
-const SWITCH_SHEET = /켜고\s*끄기|on\s*[\/_-]?\s*off|스위치/i;
-const TRUTHY = /^(on|o|y|yes|true|1|켬|켜|켜기|켜짐|ㅇ)$/i;
-const MIXY = /^(반반|랜덤|random|mix)$/i;
 const DIR_NAME = /\[?\s*A\s*(→|->)\s*B\s*\]?/i;
 const BASE_NAME = /인원|드러난|구도|검열|카메라|배경|장소|품질|화풍/;
 const nai = (opts) => (opts.length > 1 ? `||${opts.join('|')}||` : opts[0] || '');
@@ -19,7 +15,6 @@ const $ = (id) => document.getElementById(id);
 const els = {
   rows: $('rows'), empty: $('empty'), rowCount: $('rowCount'), switches: $('switches'),
   spin: $('spinBtn'), status: $('status'), songNo: $('songNo'),
-  reload: $('reloadBtn'), fileName: $('fileName'),
   lyric: { base: $('lyricBase'), a: $('lyricA'), b: $('lyricB') },
   whoA: $('whoA'), whoB: $('whoB'), swap: $('swapBtn'), copyAll: $('copyAllBtn'),
   queue: $('queue'), queueEmpty: $('queueEmpty'),
@@ -27,171 +22,61 @@ const els = {
 };
 
 let state = {
-  fileName: '', loadedAt: '',
   categories: [],   // { key, name, group, items[], def, startOff, dir }
   toggles: [],      // { name, on, off, start, front }
-  meta: { dir: {}, ko: {}, lv: {} },
+  meta: { dir: {}, ko: {}, lv: {}, dan: {}, rule: {}, presets: [] },
   pick: {}, lock: {}, use: {}, sw: {}, bundle: {},
   route: {},        // key → 'base' | 'a' | 'b' (방향 없는 줄만)
   level: 3,
   swap: false,
-  mixRows: 0,       // 돌릴 때 잠그지 않은 줄이 빠질 확률(0이면 켜고 끄기는 그대로)
+  off: {},          // key → true: 사용자 · 프리셋이 끈 줄
 };
 
 /* ---------- 읽기 ---------- */
 
-const cell = (v) => (v == null ? '' : String(v).trim());
 const metaKey = (reel, tag) => reel + '\u0001' + tag;
 const bareName = (name) => name.replace(DIR_NAME, '').trim();
 
-function parseWorkbook(wb) {
-  const categories = [];
-  let toggles = [];
-  const meta = { dir: {}, ko: {}, lv: {}, dan: {}, presets: [] };
-  const memo = wb.SheetNames.filter((n) => n.trim().startsWith('#'));
-  for (const n of memo) {
-    const kind = /방향|direction/i.test(n) ? 'dir' : /뜻|meaning/i.test(n) ? 'ko' : /강도|수위|level/i.test(n) ? 'lv' : '';
-    const rows = XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, defval: '', blankrows: false });
-    if (kind) readMemo(rows, kind, meta);
-    else if (/단부루|danbooru/i.test(n)) readDanbooru(rows, meta);
-    else if (/프리셋|preset/i.test(n)) readPresets(rows, meta);
-  }
-  const sheets = wb.SheetNames.filter((n) => !n.trim().startsWith('#'));
-  const randomSheets = sheets.filter((n) => !SWITCH_SHEET.test(n));
-  for (const sheetName of sheets) {
-    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: '', blankrows: false });
-    if (!rows.length) continue;
-    if (SWITCH_SHEET.test(sheetName)) { toggles = toggles.concat(parseToggles(rows)); continue; }
-    const head = rows[0];
-    for (let c = 0; c < head.length; c++) {
-      let name = cell(head[c]);
-      const startOff = name.startsWith('-');
-      if (startOff) name = name.slice(1).trim();
-      if (!name) continue;
-      const seen = new Set();
-      const items = [];
-      let def = '';
-      for (let r = 1; r < rows.length; r++) {
-        let v = cell(rows[r][c]);
-        if (v.startsWith('*')) { v = v.slice(1).trim(); if (!def) def = v; }
-        if (v && !seen.has(v)) { seen.add(v); items.push(v); }
-      }
-      if (!items.length) continue;
-      const group = randomSheets.length > 1 ? sheetName : '';
-      // 머리에 [A→B]가 붙은 줄은 전부 방향이 있고, 아닌 줄은 #방향에 적힌 값만 방향이 있다
-      const dir = DIR_NAME.test(name);
-      categories.push({ key: group + '\u0001' + name, name, group, items, def, startOff, dir });
+function fromData(D) {
+  const meta = { dir: {}, ko: {}, lv: {}, dan: {}, rule: {}, presets: D.presets || [] };
+  const categories = D.reels.map((r) => {
+    for (const it of r.items) {
+      const k = metaKey(r.name, it.t);
+      const { t, ko, lv, dir, dan, def, ...rule } = it;
+      meta.ko[k] = ko || '';
+      meta.lv[k] = lv || 1;
+      if (dir) meta.dir[k] = dir;
+      if (dan === false) meta.dan[k] = false;
+      meta.rule[k] = rule;
     }
-  }
-  return { categories, toggles, meta };
+    return {
+      key: r.sheet + '\u0001' + r.name, name: r.name, group: r.sheet,
+      items: r.items.map((it) => it.t), def: (r.items.find((it) => it.def) || {}).t || '',
+      startOff: r.off, dir: r.dir, route: r.route,
+    };
+  });
+  return { categories, toggles: D.toggles, meta };
 }
 
-// 메모 시트는 위에 설명 줄이 있어도 된다. "태그"가 든 줄을 머리말로 본다
-function readMemo(rows, kind, meta) {
-  const h = rows.findIndex((r) => r.some((x) => /^태그$|^tag$/i.test(cell(x))));
-  if (h < 0) return;
-  const head = rows[h].map(cell);
-  const ti = head.findIndex((x) => /^태그$|^tag$/i.test(x));
-  const ri = head.findIndex((x) => /^릴$|항목|reel/i.test(x));
-  const vi = ti + 1;
-  for (const row of rows.slice(h + 1)) {
-    const tag = cell(row[ti]);
-    const val = cell(row[vi]);
-    if (!tag || !val) continue;
-    const reel = ri >= 0 ? cell(row[ri]).replace(/^-/, '').trim() : '';
-    let v = val;
-    if (kind === 'dir') v = /서로|mutual/i.test(val) ? 'mutual' : 'ab';
-    if (kind === 'lv') { v = Math.min(3, Math.max(1, parseInt(val, 10) || 1)); }
-    meta[kind][metaKey(reel, tag)] = v;
-    if (!(metaKey('', tag) in meta[kind])) meta[kind][metaKey('', tag)] = v;
-  }
-}
-
-// #단부루: 시트 · 릴 · 칸 값 · 태그 · 판정. 칸 안의 태그가 전부 단부루(또는 NAI 문법)일 때만 공식으로 본다.
-// 화면에는 표시하지 않고, 태그 모음의 '단부루 태그만' 거르기에만 쓴다
-function readDanbooru(rows, meta) {
-  const h = rows.findIndex((r) => r.some((x) => /^판정$/.test(cell(x))));
-  if (h < 0) return;
-  const head = rows[h].map(cell);
-  const ri = head.indexOf('릴');
-  const vi = head.indexOf('칸 값');
-  const ji = head.indexOf('판정');
-  for (const row of rows.slice(h + 1)) {
-    const k = metaKey(cell(row[ri]).replace(/^-/, '').trim(), cell(row[vi]));
-    const ok = /^(단부루|NAI 문법)$/.test(cell(row[ji]));
-    meta.dan[k] = (meta.dan[k] ?? true) && ok;
-  }
-}
-
-// #프리셋: 프리셋 · 설명 · 수위 · 줄 섞기 · 고를 값("줄=값 ; 줄=값") · 켤 것 · 끌 것(쉼표로 나눔)
-function readPresets(rows, meta) {
-  const h = rows.findIndex((r) => cell(r[0]) === '프리셋');
-  if (h < 0) return;
-  const head = rows[h].map(cell);
-  const at = (row, name) => cell(row[head.indexOf(name)]);
-  const list = (text) => text.split(',').map((x) => x.trim()).filter(Boolean);
-  for (const row of rows.slice(h + 1)) {
-    const name = at(row, '프리셋');
-    if (!name) continue;
-    meta.presets.push({
-      name,
-      note: at(row, '설명'),
-      level: parseInt(at(row, '수위'), 10) || 0,
-      mix: { '안 함': 0, '조금': 0.25, '반반': 0.5 }[at(row, '줄 섞기')],
-      picks: at(row, '고를 값').split(';').map((x) => x.split('=')).filter((x) => x.length > 1)
-        .map(([k, ...v]) => [k.trim(), v.join('=').trim()]),
-      on: list(at(row, '켤 것')),
-      off: list(at(row, '끌 것')),
-    });
-  }
-}
-
-function parseToggles(rows) {
-  const head = rows[0].map((h) => cell(h).toLowerCase());
-  const find = (re, fallback) => {
-    const i = head.findIndex((h) => re.test(h));
-    return i >= 0 ? i : fallback;
-  };
-  const col = {
-    name: find(/이름|name/, 0), on: find(/켜면|켤 때|^on/, 1), off: find(/끄면|끌 때|^off/, 2),
-    start: find(/처음|기본|default/, 3), pos: find(/위치|자리|position/, 4),
-  };
-  const out = [];
-  for (const row of rows.slice(1)) {
-    const name = cell(row[col.name]);
-    const on = cell(row[col.on]);
-    const off = cell(row[col.off]);
-    if (!name || (!on && !off)) continue;
-    out.push({
-      name, on, off,
-      start: MIXY.test(cell(row[col.start])) ? 'mix' : TRUTHY.test(cell(row[col.start])),
-      front: /^(앞|front|처음)/i.test(cell(row[col.pos])),
-    });
-  }
-  return out;
-}
-
-const metaOf = (kind, c, tag) => {
-  const m = state.meta[kind] || {};
-  return m[metaKey(c.name, tag)] ?? m[metaKey('', tag)];
-};
+const metaOf = (kind, c, tag) => (state.meta[kind] || {})[metaKey(c.name, tag)];
+const ruleOf = (c, tag) => (state.meta.rule || {})[metaKey(c.name, tag)] || {};
 const levelOf = (c, tag) => metaOf('lv', c, tag) || 1;
 // 이 값이 방향 있는 값인가: [A→B] 줄이면 늘, 아니면 그 줄 이름으로 #방향에 적혀 있을 때만
 const dirOf = (c, v) => (c.dir ? metaOf('dir', c, v) || 'ab' : (state.meta.dir || {})[metaKey(c.name, v)]);
 const allowed = (c) => c.items.filter((t) => levelOf(c, t) <= state.level);
 
 function defaultRoute(c, hasDir) {
+  if (c.route) return c.route;
   if (BASE_NAME.test(c.name) || BASE_NAME.test(c.group)) return 'base';
   return hasDir ? 'b' : 'base';
 }
 
-function applyParsed(parsed, fileName) {
+function applyParsed(parsed) {
   const old = state;
   const next = {
     ...old,
-    fileName, loadedAt: stamp(),
     categories: parsed.categories, toggles: parsed.toggles, meta: parsed.meta,
-    pick: {}, lock: {}, use: {}, sw: {}, bundle: {}, route: {},
+    pick: {}, lock: {}, use: {}, sw: {}, bundle: {}, route: {}, off: {},
   };
   state = next;
   const hasDir = next.categories.some((c) => c.dir);
@@ -200,17 +85,18 @@ function applyParsed(parsed, fileName) {
   for (const c of next.categories) {
     next.route[c.key] = old.route[c.key] || defaultRoute(c, hasDir);
     if (!known.has(c.key)) {
-      if (c.startOff) next.use[c.key] = false;
+      if (c.startOff) { next.use[c.key] = false; next.off[c.key] = true; }
       if (c.def) { next.pick[c.key] = c.def; next.lock[c.key] = true; continue; }
     }
     if (old.use[c.key] === false) next.use[c.key] = false;
+    if ((old.off || {})[c.key] || (!old.off && old.use[c.key] === false)) next.off[c.key] = true;
     const b = old.bundle && old.bundle[c.key];
     if (b) next.bundle[c.key] = { items: b.items.filter((v) => c.items.includes(v)), none: b.none };
     if (old.pick[c.key] && c.items.includes(old.pick[c.key])) {
       next.pick[c.key] = old.pick[c.key];
       if (old.lock[c.key]) next.lock[c.key] = true;
     } else if (c.def) {
-      // 전에 고른 값이 엑셀에서 빠졌으면 엑셀의 처음 값(*)으로 돌아간다
+      // 전에 고른 값이 데이터에서 빠졌으면 처음 값(def)으로 돌아간다
       next.pick[c.key] = c.def;
       next.lock[c.key] = true;
     } else {
@@ -218,31 +104,9 @@ function applyParsed(parsed, fileName) {
     }
   }
   for (const t of next.toggles) next.sw[t.name] = t.name in old.sw ? old.sw[t.name] : t.start;
+  settle();
   save();
   render();
-  const n = state.categories.length;
-  setStatus(n ? `줄 ${n}개 · 스위치 ${state.toggles.length}개를 읽었어요.` : '첫 줄에 항목 이름, 그 아래에 값이 든 시트를 찾지 못했어요.');
-}
-
-/* ---------- 같은 폴더의 엑셀 읽기 ---------- */
-
-// 엑셀은 이 파일 하나로 정해져 있다. 켤 때 · 다시 읽기를 누를 때마다 같은 폴더에서 새로 읽는다
-const TAGS_FILE = 'Screentone 태그.xlsx';
-
-async function loadTags() {
-  try {
-    const res = await fetch(encodeURIComponent(TAGS_FILE), { cache: 'no-store' });
-    if (!res.ok) throw new Error(res.status);
-    applyParsed(parseWorkbook(XLSX.read(await res.arrayBuffer())), TAGS_FILE);
-  } catch (_) {
-    // 파일을 두 번 눌러 연 file:// 화면에서는 브라우저가 옆 파일 읽기를 막는다
-    const local = location.protocol === 'file:';
-    els.empty.textContent = local
-      ? `브라우저가 파일로 연 화면에서는 옆의 엑셀을 못 읽어요. 같은 폴더의 '켜기.bat'으로 여세요.`
-      : `같은 폴더에서 '${TAGS_FILE}'을 찾지 못했어요.`;
-    els.empty.hidden = false;
-    setStatus('엑셀을 읽지 못했어요.');
-  }
 }
 
 /* ---------- 뽑기 ---------- */
@@ -253,20 +117,122 @@ function randomOf(arr, not) {
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
+/* ---------- 어울림 ---------- */
+
+const active = (c) => state.use[c.key] !== false && !state.bundle[c.key];
+
+// 인원 값 → 남자 · 여자 수와 A · B 성별. 인원 줄을 끄면 남녀 둘로 본다
+function headcount(text) {
+  const count = (word) => {
+    if (new RegExp(`multiple ${word}s`).test(text)) return 3;
+    const m = text.match(new RegExp(`\\b([1-9])${word}s?\\b`));
+    return m ? Number(m[1]) : 0;
+  };
+  return { m: count('boy'), f: count('girl') };
+}
+function castOf(picks) {
+  const c = state.categories.find((x) => /인원/.test(x.name));
+  const text = c && active(c) ? picks[c.key] || '' : '';
+  const { m, f } = text ? headcount(text) : { m: 1, f: 1 };
+  let a = 'boy';
+  let b = 'girl';
+  if (!f && m) b = m > 1 ? 'boy' : '';
+  else if (f && !m) { a = 'girl'; b = f > 1 ? 'girl' : ''; }
+  if (state.swap && b) [a, b] = [b, a];
+  return { m, f, n: m + f, a, b };
+}
+
+// 이 값이 들어가는 칸: 방향 있는 한 태그는 두 사람(pair), 여러 태그 칸은 기본, 나머지는 줄의 칸
+function sideOf(c, v) {
+  if (dirOf(c, v)) return splitTags(v).length > 1 ? 'base' : (ruleOf(c, v).side || 'pair');
+  return state.route[c.key] || 'base';
+}
+
+// need: 그 몸 · 사람 수가 있어야 한다. A · B 칸에 들어가면 그 사람의 성별을 본다
+function needOk(c, v, who) {
+  let side = sideOf(c, v);
+  if (side === 'b' && !who.b) side = 'a';
+  const sex = { a: who.a, b: who.b };
+  for (const k of ruleOf(c, v).need || []) {
+    if (k === 'm' && !(sex[side] ? sex[side] === 'boy' : who.m > 0)) return false;
+    if (k === 'f' && !(sex[side] ? sex[side] === 'girl' : who.f > 0)) return false;
+    if (k === 'mm' && who.m < 2) return false;
+    if (k === 'ff' && who.f < 2) return false;
+    if (k === '3' && who.n < 3) return false;
+    if (k === 'pair' && who.n < 2) return false;
+  }
+  return true;
+}
+
+// 두 값이 한 장에 같이 있을 수 없나: 자세끼리 · 장소와 자세 · 옷 상태와 옷
+function clash(r, q) {
+  if (r.pose && q.pose && r.pose !== q.pose) return true;
+  if (r.pose && q.poses && !q.poses.includes(r.pose)) return true;
+  if (q.pose && r.poses && !r.poses.includes(q.pose)) return true;
+  if ((r.big && q.tight) || (q.big && r.tight)) return true;
+  // 입이 바쁘면 키스 안 됨, 재갈을 물면 다른 입 동작 안 됨 · 손이 묶이면 손 쓰는 동작 안 됨
+  if ((r.mouth === 'oral' && q.mouth === 'kiss') || (r.mouth === 'kiss' && q.mouth === 'oral')) return true;
+  if ((r.mouth === 'gag' && q.mouth) || (q.mouth === 'gag' && r.mouth)) return true;
+  if ((r.bound && q.hands) || (q.bound && r.hands)) return true;
+  if ((r.at && q.place && !r.at.includes(q.place)) || (q.at && r.place && !q.at.includes(r.place))) return true;
+  if ((r.garb && q.has && !q.has.includes(r.garb)) || (q.garb && r.has && !r.has.includes(q.garb))) return true;
+  // 넣기 직전 · 하는 중 · 끝난 뒤는 한 장에 하나만
+  if (r.phase && q.phase && r.phase !== q.phase) return true;
+  if ((r.wear === 'nude' && q.cover) || (q.wear === 'nude' && r.cover)) return true;
+  if ((r.wear === 'full' && q.bare) || (q.wear === 'full' && r.bare)) return true;
+  return false;
+}
+
+// picks: 이미 정해진 줄의 값. c 줄에 t를 넣어도 그 값들과 맞는가
+function fits(c, t, picks) {
+  const ctx = { ...picks, [c.key]: t };
+  const who = castOf(ctx);
+  if (!needOk(c, t, who)) return false;
+  const r = ruleOf(c, t);
+  const isCast = /인원/.test(c.name);
+  for (const d of state.categories) {
+    if (d === c || !active(d) || !picks[d.key]) continue;
+    const u = picks[d.key];
+    if (isCast && !needOk(d, u, who)) return false;
+    if (clash(r, ruleOf(d, u))) return false;
+  }
+  return true;
+}
+
+const candidates = (c, picks) => allowed(c).filter((t) => fits(c, t, picks));
+
+// 정하는 순서: 사람 → 장소 → 옷 → 체위 → 나머지. 앞에서 정한 것에 뒤가 맞춘다
+const ORDER = [/인원/, /장소/, /옷 상태/, /^옷$/, /^체위 \[/, /체위 조합/, /행위/, /몸 자세/];
+function rollOrder() {
+  const rank = (c) => { const i = ORDER.findIndex((re) => re.test(c.name)); return i < 0 ? ORDER.length : i; };
+  return state.categories.slice().sort((a, b) => rank(a) - rank(b));
+}
+const lockedPicks = () => Object.fromEntries(state.categories
+  .filter((c) => active(c) && state.lock[c.key] && state.pick[c.key]).map((c) => [c.key, state.pick[c.key]]));
+
+// 잠그지 않은 줄을 순서대로 다시 맞춘다. keep이면 지금 값이 맞을 때 그대로 둔다
+function settle(keep = true) {
+  const decided = lockedPicks();
+  for (const c of rollOrder()) {
+    if (!active(c) || state.lock[c.key]) continue;
+    const v = state.pick[c.key];
+    if (!(keep && v && levelOf(c, v) <= state.level && fits(c, v, decided))) {
+      state.pick[c.key] = randomOf(candidates(c, decided), keep ? null : v);
+    }
+    if (state.pick[c.key]) decided[c.key] = state.pick[c.key];
+  }
+}
+
+// 🎲: 그 줄만 다른 줄들과 맞는 것 중에서 다시 뽑는다
 function rollOne(c) {
-  state.pick[c.key] = randomOf(allowed(c), state.pick[c.key]);
+  const others = Object.fromEntries(state.categories
+    .filter((d) => d !== c && active(d) && state.pick[d.key]).map((d) => [d.key, state.pick[d.key]]));
+  state.pick[c.key] = randomOf(candidates(c, others), state.pick[c.key]);
 }
 
 function spin() {
   if (!state.categories.length) return;
-  for (const c of state.categories) {
-    if (state.lock[c.key] || state.bundle[c.key]) continue;
-    // 줄 섞기를 켜면 잠그지 않은 줄의 넣기/빼기도 같이 뽑는다. 잠근 줄은 값도 켜고 끄기도 그대로
-    if (state.mixRows) {
-      if (Math.random() < state.mixRows) state.use[c.key] = false; else delete state.use[c.key];
-    }
-    if (state.use[c.key] !== false) rollOne(c);
-  }
+  settle(false);
   save();
   renderRows();
   renderLyrics(true);
@@ -275,11 +241,8 @@ function spin() {
 
 function setLevel(n) {
   state.level = n;
-  // 잠그지 않은 줄 중 새 수위를 넘는 값만 다시 뽑는다. 직접 고른(잠근) 값은 그대로
-  for (const c of state.categories) {
-    const p = state.pick[c.key];
-    if (!state.lock[c.key] && (!p || levelOf(c, p) > n)) state.pick[c.key] = randomOf(allowed(c));
-  }
+  // 잠그지 않은 줄 중 새 수위를 넘거나 안 맞는 값만 다시 뽑는다. 직접 고른(잠근) 값은 그대로
+  settle();
   save();
   renderLevel();
   renderRows();
@@ -301,19 +264,7 @@ const splitTags = (text) => {
   return out.map((t) => t.trim()).filter(Boolean);
 };
 
-// 인원 줄의 값으로 A · B 성별을 정한다. 남녀면 A 남자 · B 여자, 혼자면 B 없음
-function cast() {
-  const c = state.categories.find((x) => /인원/.test(x.name));
-  const text = c && state.use[c.key] !== false && !state.bundle[c.key] ? state.pick[c.key] || '' : '';
-  const girls = /\b(multiple girls|[2-9]girls)\b/.test(text) ? 2 : /\b1girl\b/.test(text) ? 1 : 0;
-  const boys = /\b(multiple boys|[2-9]boys)\b/.test(text) ? 2 : /\b1boy\b/.test(text) ? 1 : 0;
-  let a = 'boy';
-  let b = 'girl';
-  if (!girls && boys) { a = 'boy'; b = boys > 1 ? 'boy' : ''; }
-  else if (girls && !boys) { a = 'girl'; b = girls > 1 ? 'girl' : ''; }
-  if (state.swap && b) [a, b] = [b, a];
-  return { a, b };
-}
+const cast = () => castOf(state.pick);
 
 function buildParts() {
   const who = cast();
@@ -342,8 +293,15 @@ function buildParts() {
     const tags = splitTags(v);
     // 태그 여럿이 한 칸이면 자세 · 손 · 표정이 섞여 있어 source#/target#를 붙일 수 없다
     if (tags.length > 1 || !who.b) { out.base.push(v); continue; }
-    out.a.push((mode === 'mutual' ? 'mutual#' : 'source#') + v);
-    out.b.push((mode === 'mutual' ? 'mutual#' : 'target#') + v);
+    const r = ruleOf(c, v);
+    // another …(상대가 나에게 하는) 태그는 받는 쪽에만
+    if (r.side === 'b') { out.b.push(v); continue; }
+    if (mode === 'mutual') { out.a.push('mutual#' + v); out.b.push('mutual#' + v); continue; }
+    // 남녀일 때 그 동작을 하는 쪽(by)이 따로 있으면 그쪽에 source#. 펠라 · 기승위는 여자 쪽
+    const want = r.by === 'f' ? 'girl' : r.by === 'm' ? 'boy' : '';
+    const flip = want && who.a !== want && who.b === want;
+    out[flip ? 'b' : 'a'].push('source#' + v);
+    out[flip ? 'a' : 'b'].push('target#' + v);
   }
   out.base.push(...back);
   if (!who.b) { out.a.push(...out.b); out.b = []; }
@@ -378,8 +336,6 @@ function render() {
   const has = state.categories.length > 0;
   els.empty.hidden = has;
   els.spin.disabled = !has;
-  els.fileName.textContent = state.fileName ? `${state.fileName} · ${state.loadedAt}` : TAGS_FILE;
-  els.fileName.title = els.fileName.textContent;
   renderLevel();
   renderPresets();
   renderRows();
@@ -392,21 +348,20 @@ const sameName = (a, b) => bareName(a.replace(/^-/, '')) === bareName(b.replace(
 const swName = (t) => t.name.replace(/\s*\(.*\)\s*$/, '');
 
 function applyPreset(p) {
-  // 프리셋끼리 쌓이지 않게 엑셀의 처음 상태(- 꺼 둔 줄 · * 처음 값 · 스위치 처음)로 되돌린 뒤 적용한다
+  // 프리셋끼리 쌓이지 않게 켜고 끄기 · 스위치는 처음 상태(- 꺼 둔 줄 · 스위치 처음)로 되돌린 뒤 적용한다.
+  // 잠금은 사용자가 정한 것이라 그대로 두고, 프리셋이 직접 고르는 값만 잠근다
   for (const c of state.categories) {
-    delete state.lock[c.key];
     delete state.bundle[c.key];
-    if (c.startOff) state.use[c.key] = false; else delete state.use[c.key];
-    if (c.def) { state.pick[c.key] = c.def; state.lock[c.key] = true; }
+    if (c.startOff) state.off[c.key] = true; else delete state.off[c.key];
   }
   for (const t of state.toggles) state.sw[t.name] = t.start;
   state.swap = false;
   if (p.level) state.level = p.level;
-  if (p.mix != null) state.mixRows = p.mix;
   const all = p.on.includes('전부');
   for (const c of state.categories) {
-    if (all || p.on.some((n) => sameName(n, c.name))) delete state.use[c.key];
-    if (p.off.some((n) => sameName(n, c.name))) state.use[c.key] = false;
+    if (all || p.on.some((n) => sameName(n, c.name))) delete state.off[c.key];
+    if (p.off.some((n) => sameName(n, c.name))) state.off[c.key] = true;
+    if (state.off[c.key]) state.use[c.key] = false; else delete state.use[c.key];
   }
   for (const t of state.toggles) {
     if (p.on.some((n) => n === swName(t) || n === t.name)) state.sw[t.name] = true;
@@ -418,15 +373,10 @@ function applyPreset(p) {
     state.pick[c.key] = value;
     state.lock[c.key] = true;
     delete state.use[c.key];
+    delete state.off[c.key];
     delete state.bundle[c.key];
   }
-  // 프리셋이 켠 줄이 바로 빠지지 않게, 이번 한 번은 줄 섞기 없이 값만 뽑는다
-  for (const c of state.categories) {
-    if (state.use[c.key] === false || state.lock[c.key] || state.bundle[c.key]) continue;
-    const v = state.pick[c.key];
-    if (!v || levelOf(c, v) > state.level) state.pick[c.key] = randomOf(allowed(c));
-    else rollOne(c);
-  }
+  settle(false);
   save();
   render();
   renderLyrics(true);
@@ -449,10 +399,7 @@ function renderPresets() {
 }
 
 function renderLevel() {
-  document.querySelectorAll('.mix-step').forEach((b) => {
-    b.setAttribute('aria-pressed', String(Number(b.dataset.mix) === (state.mixRows || 0)));
-  });
-  document.querySelectorAll('.heat-step').forEach((b) => {
+  document.querySelectorAll('.heat-step[data-level]').forEach((b) => {
     b.setAttribute('aria-pressed', String(Number(b.dataset.level) === state.level));
   });
 }
@@ -498,8 +445,8 @@ function makeRow(c, no) {
   use.checked = used;
   use.title = '끄면 이 줄을 프롬프트에서 빼요';
   use.addEventListener('change', () => {
-    if (use.checked) delete state.use[c.key]; else state.use[c.key] = false;
-    save(); refreshRow(c); renderLyrics();
+    if (use.checked) { delete state.use[c.key]; delete state.off[c.key]; } else { state.use[c.key] = false; state.off[c.key] = true; }
+    settle(); save(); renderRows(); renderLyrics();
   });
 
   const num = document.createElement('span');
@@ -526,7 +473,9 @@ function makeRow(c, no) {
     val.addEventListener('click', () => openPicker(c, row));
   } else {
     const v = state.pick[c.key] || '';
-    tag.textContent = v || (ok ? '' : '이 수위엔 값이 없어요');
+    const others = Object.fromEntries(state.categories
+      .filter((d) => d !== c && active(d) && state.pick[d.key]).map((d) => [d.key, state.pick[d.key]]));
+    tag.textContent = v || (ok ? blocker(c) : '이 수위엔 값이 없어요');
     ko.textContent = v ? metaOf('ko', c, v) || '' : '';
     const select = document.createElement('select');
     select.className = 'chooser';
@@ -535,7 +484,8 @@ function makeRow(c, no) {
       const lv = levelOf(c, item);
       const k = metaOf('ko', c, item);
       const opt = new Option(`${'●'.repeat(lv)}${'○'.repeat(3 - lv)}  ${item}${k ? '  — ' + k : ''}`, item);
-      if (lv > state.level) opt.className = 'over';
+      // 수위를 넘거나 다른 줄과 안 맞는 값은 흐리게. 골라도 되고, 고르면 그 값이 이긴다
+      if (lv > state.level || !fits(c, item, others)) opt.className = 'over';
       select.add(opt);
     }
     if (!v) select.add(new Option('', ''), 0);
@@ -543,7 +493,7 @@ function makeRow(c, no) {
     select.addEventListener('change', () => {
       state.pick[c.key] = select.value;
       state.lock[c.key] = true;
-      save(); refreshRow(c); renderLyrics();
+      settle(); save(); renderRows(); renderLyrics();
     });
     val.append(select);
   }
@@ -571,7 +521,7 @@ function makeRow(c, no) {
     route.title = '이 줄을 넣을 칸: 누를 때마다 기본 → A → B';
     route.addEventListener('click', () => {
       state.route[c.key] = ROUTE_NEXT[state.route[c.key] || 'base'];
-      save(); refreshRow(c); renderLyrics();
+      settle(); save(); renderRows(); renderLyrics();
     });
   }
 
@@ -584,7 +534,7 @@ function makeRow(c, no) {
   bundle.addEventListener('click', () => {
     if (state.bundle[c.key]) delete state.bundle[c.key];
     else state.bundle[c.key] = { items: allowed(c), none: false };
-    save(); refreshRow(c); renderLyrics();
+    settle(); save(); renderRows(); renderLyrics();
     if (state.bundle[c.key]) openPicker(c, els.rows.querySelector(`[data-key="${CSS.escape(c.key)}"]`));
   });
 
@@ -781,7 +731,7 @@ function pushHistory() {
     code: songNo(text),
     snap: JSON.parse(JSON.stringify({
       pick: state.pick, lock: state.lock, use: state.use, sw: state.sw, bundle: state.bundle,
-      route: state.route, level: state.level, swap: state.swap, mixRows: state.mixRows,
+      route: state.route, level: state.level, swap: state.swap, off: state.off,
     })),
   });
   if (received.length > 20) received.length = 20;
@@ -828,6 +778,47 @@ const noteEntries = () => received.map((h) => ({
 }));
 const fileStamp = () => fullStamp().replace(/[-: ]/g, '').slice(0, 12);
 
+// 이 줄에 맞는 값이 없을 때, 그 잠근 줄 하나만 빼면 생기는지 보고 그 줄을 짚는다
+function blocker(c) {
+  const all = Object.fromEntries(state.categories
+    .filter((d) => d !== c && active(d) && state.pick[d.key]).map((d) => [d.key, state.pick[d.key]]));
+  for (const d of state.categories) {
+    if (!(d.key in all) || !state.lock[d.key]) continue;
+    const rest = { ...all };
+    delete rest[d.key];
+    if (candidates(c, rest).length) return `${bareName(d.name)}(${all[d.key]})와 맞는 값이 없어요`;
+  }
+  return '이 조합엔 맞는 값이 없어요';
+}
+
+/* ---------- 데이터 검사 (켤 때 콘솔에) ---------- */
+
+function validate() {
+  const warn = [];
+  for (const c of state.categories) {
+    for (const t of c.items) if (!metaOf('ko', c, t)) warn.push(`뜻 없음: ${c.name} · ${t}`);
+  }
+  const named = (n) => state.categories.some((c) => sameName(n, c.name)) || state.toggles.some((t) => n === swName(t) || n === t.name);
+  for (const p of state.meta.presets || []) {
+    for (const [reel, v] of p.picks) {
+      const c = state.categories.find((x) => sameName(reel, x.name));
+      if (!c || !c.items.includes(v)) warn.push(`프리셋 ${p.name}: 없는 값 ${reel}=${v}`);
+    }
+    for (const n of [...p.on, ...p.off]) if (n !== '전부' && !named(n)) warn.push(`프리셋 ${p.name}: 없는 줄 · 스위치 ${n}`);
+  }
+  // 둘 이상인 인원마다 체위 줄에 고를 값이 남는지
+  const castRow = state.categories.find((c) => /인원/.test(c.name));
+  const posRow = state.categories.find((c) => /^체위 \[/.test(c.name));
+  if (castRow && posRow) {
+    for (const v of castRow.items) {
+      if (/solo/.test(v)) continue;
+      if (!posRow.items.some((t) => fits(posRow, t, { [castRow.key]: v }))) warn.push(`인원 '${v}'에 맞는 체위가 없음`);
+    }
+  }
+  if (warn.length) console.warn('[Screentone 데이터 검사]\n' + warn.join('\n'));
+  return warn;
+}
+
 /* ---------- 기타 ---------- */
 
 function stamp() {
@@ -857,6 +848,9 @@ function load() {
     const raw = JSON.parse(localStorage.getItem(STORE) || 'null');
     if (raw && Array.isArray(raw.categories)) state = { ...state, ...raw };
   } catch (_) { /* 처음 켠 것처럼 */ }
+  // 예전 버그로 수위가 숫자가 아니게 저장됐으면 3으로 되돌린다
+  if (![1, 2, 3].includes(state.level)) state.level = 3;
+  delete state.mixRows;
 }
 
 async function copyText(text, done) {
@@ -878,16 +872,12 @@ document.querySelectorAll('.copy').forEach((b) => {
   b.addEventListener('click', () => copyText(current[b.dataset.copy], `${PART_WORD[b.dataset.copy]}을 복사했어요.`));
 });
 els.copyAll.addEventListener('click', () => copyText(combined(current), '세 칸을 한꺼번에 복사했어요.'));
-els.swap.addEventListener('click', () => { state.swap = !state.swap; save(); renderLyrics(); });
-document.querySelectorAll('.heat-step').forEach((b) => b.addEventListener('click', () => setLevel(Number(b.dataset.level))));
+els.swap.addEventListener('click', () => { state.swap = !state.swap; settle(); save(); renderRows(); renderLyrics(); });
+document.querySelectorAll('.heat-step[data-level]').forEach((b) => b.addEventListener('click', () => setLevel(Number(b.dataset.level))));
 $('histTxt').addEventListener('click', () => PANote.download(`screentone-${fileStamp()}.txt`, PANote.toTxt(noteEntries()), 'text/plain;charset=utf-8'));
 $('histMd').addEventListener('click', () => PANote.download(`screentone-${fileStamp()}.md`, PANote.toMd(noteEntries()), 'text/markdown;charset=utf-8'));
 $('histNote').addEventListener('click', () => PANote.download(`prompt-archive-note-${fileStamp()}.html`, PANote.toHtml(noteEntries()), 'text/html;charset=utf-8'));
 els.helpBtn.addEventListener('click', () => els.help.showModal());
-document.querySelectorAll('.mix-step').forEach((b) => b.addEventListener('click', () => {
-  state.mixRows = Number(b.dataset.mix);
-  save(); renderLevel();
-}));
 
 /* ---------- 태그 모음 ---------- */
 
@@ -941,8 +931,9 @@ function renderBook() {
         state.pick[c.key] = t;
         state.lock[c.key] = true;
         delete state.use[c.key];
+        delete state.off[c.key];
         delete state.bundle[c.key];
-        save(); renderRows(); renderLyrics(); renderBook();
+        settle(); save(); renderRows(); renderLyrics(); renderBook();
         setStatus(`${bareName(c.name)} 줄에 '${t}'를 골랐어요.`);
       });
       sec.append(b);
@@ -956,7 +947,6 @@ $('bookBtn').addEventListener('click', () => { renderBook(); book.showModal(); b
 bookFind.addEventListener('input', renderBook);
 bookOfficial.addEventListener('change', renderBook);
 
-els.reload.addEventListener('click', loadTags);
 els.spin.addEventListener('click', spin);
 
 document.addEventListener('keydown', (e) => {
@@ -968,7 +958,9 @@ document.addEventListener('keydown', (e) => {
 load();
 render();
 renderHistory();
-loadTags();
+applyParsed(fromData(window.SCREENTONE));
+$('version').textContent = `v${VERSION}`;
+validate();
 
 // 헤드리스 점검용 창구
-window.__screentone = { parseWorkbook, applyParsed, buildParts, spin, setLevel, state: () => state, received };
+window.__screentone = { VERSION, validate, fromData, applyParsed, buildParts, spin, setLevel, settle, fits, castOf, candidates, state: () => state, received };
